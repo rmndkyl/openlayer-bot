@@ -4,129 +4,154 @@ const axios = require('axios');
 const moment = require('moment');
 const configuration = require('./config');
 const { HttpsProxyAgent } = require('https-proxy-agent');
+const gradient = require('gradient-string');
+const figlet = require('figlet');
+const ora = require('ora');
 
-const apiurl = 'https://us-central1-openoracle-de73b.cloudfunctions.net';
+const API_URL = 'https://us-central1-openoracle-de73b.cloudfunctions.net';
+const CHECK_IN_INTERVAL = 12 * 60 * 60 * 1000; // 12 hours in milliseconds
 
 async function displayHeader() {
-    const width = process.stdout.columns;
-    const lines = [
-      "██╗░░░░░░█████╗░██╗░░░██╗███████╗██████╗░  ░█████╗░██╗██████╗░██████╗░██████╗░░█████╗░██████╗░",
-      "██║░░░░░██╔══██╗╚██╗░██╔╝██╔════╝██╔══██╗  ██╔══██╗██║██╔══██╗██╔══██╗██╔══██╗██╔══██╗██╔══██╗",
-      "██║░░░░░███████║░╚████╔╝░█████╗░░██████╔╝  ███████║██║██████╔╝██║░░██║██████╔╝██║░░██║██████╔╝",
-      "██║░░░░░██╔══██║░░╚██╔╝░░██╔══╝░░██╔══██╗  ██╔══██║██║██╔══██╗██║░░██║██╔══██╗██║░░██║██╔═══╝░",
-      "███████╗██║░░██║░░░██║░░░███████╗██║░░██║  ██║░░██║██║██║░░██║██████╔╝██║░░██║╚█████╔╝██║░░░░░",
-      "╚══════╝╚═╝░░╚═╝░░░╚═╝░░░╚══════╝╚═╝░░╚═╝  ╚═╝░░╚═╝╚═╝╚═╝░░╚═╝╚═════╝░╚═╝░░╚═╝░╚════╝░╚═╝░░░░░",
-      "",
-      "The script and tutorial were written by Telegram user @rmndkyl, free and open source, please do not believe in the paid version.",
-      "",
-      "Presented by @recitativonika"
-    ];
-
-    console.log("");
-    lines.forEach(line => {
-        const padding = Math.max(0, Math.floor((width - line.length) / 2));
-        console.log(" ".repeat(padding) + line.bold.yellow);
+    return new Promise((resolve) => {
+        figlet('Layer Airdrop', {
+            font: 'ANSI Shadow',
+            horizontalLayout: 'default',
+            verticalLayout: 'default',
+        }, (err, data) => {
+            if (err) {
+                console.log('Something went wrong with the banner...');
+                resolve();
+                return;
+            }
+            console.log(gradient.rainbow(data));
+            console.log(gradient.pastel('\n=== OpenLayer Check-in Bot v2.0 ===\n'));
+            console.log(gradient.cristal('Created by @rmndkyl\n'));
+            resolve();
+        });
     });
-    console.log("");
 }
 
 async function retrieveUserInfo(token) {
-  const { data } = await axios({
-    url: `${apiurl}/backend_apis/api/service/userInfo`,
-    method: 'GET',
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-  });
-  return data.data;
+    const spinner = ora('Retrieving user information...').start();
+    
+    try {
+        const { data } = await axios({
+            url: `${API_URL}/backend_apis/api/service/userInfo`,
+            method: 'GET',
+            headers: {
+                Authorization: `Bearer ${token}`,
+            },
+        });
+        
+        spinner.succeed('User information retrieved successfully');
+        return data.data;
+    } catch (error) {
+        spinner.fail('Failed to retrieve user information');
+        throw error;
+    }
 }
 
-async function showUserData(token, proxyAddress) {
-  try {
-    const userData = await retrieveUserInfo(token);
+function displayUserStats(userData, proxyAddress) {
+    const paddingLength = 120; // Increased to accommodate longer proxy URLs
+    const statsBox = [
+        '\n═' + '═'.repeat(paddingLength) + '═'.cyan,
+        `🟢`.cyan + ` Username:`.padEnd(15) + userData.xUsername.bold.yellow.padEnd(paddingLength - 55) + ''.cyan,
+        `🟢`.cyan + ` Egg:`.padEnd(15) + `${userData.eggInfo.eggInfo.name} ${userData.eggInfo.eggInfo.type}`.padEnd(paddingLength - 55) + ''.cyan,
+        `🟢`.cyan + ` Multiplier:`.padEnd(15) + `${userData.point.multiplier}x`.bold.yellow.padEnd(paddingLength - 55) + ''.cyan,
+        `🟢`.cyan + ` Checkins:`.padEnd(15) + userData.point.consecutiveCheckinCount.toString().bold.yellow.padEnd(paddingLength - 55) + ''.cyan,
+        `🟢`.cyan + ` Points:`.padEnd(15) + userData.point.currentPoints.toString().bold.green.padEnd(paddingLength - 55) + ''.cyan,
+    ];
 
-    console.log(`Username: ${userData.xUsername.bold.yellow} | ${userData.eggInfo.eggInfo.name} ${userData.eggInfo.eggInfo.type} ${userData.eggInfo.eggInfo.info} `.white);
-    console.log(`Multiplier: ${userData.point.multiplier.toString().bold.yellow}x | Total checkin: ${userData.point.consecutiveCheckinCount.toString().bold.yellow} `.white);
-    console.log(`Points: ${userData.point.currentPoints.toString().bold.green}`);
     if (proxyAddress) {
-      console.log(`Using Proxy: `.white + proxyAddress.cyan);
+        statsBox.push(`🟢`.cyan + ` Proxy:`.padEnd(15) + proxyAddress.cyan.padEnd(paddingLength - 17) + ''.cyan);
     }
-    console.log();
-  } catch (error) {
-    logError(error);
-  }
+    
+    statsBox.push('═' + '═'.repeat(paddingLength) + '═'.cyan);
+    console.log(statsBox.join('\n'));
 }
 
 async function authenticateUser(token, proxyAddress = null) {
-  const requestConfig = {
-    url: `${apiurl}/backend_apis/api/service/checkIn`,
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-    data: {},
-  };
+    const spinner = ora('Authenticating...').start();
+    
+    try {
+        const requestConfig = {
+            url: `${API_URL}/backend_apis/api/service/checkIn`,
+            method: 'POST',
+            headers: {
+                Authorization: `Bearer ${token}`,
+            },
+            data: {},
+        };
 
-  if (proxyAddress) {
-    requestConfig.httpsAgent = new HttpsProxyAgent(proxyAddress);
-  }
+        if (proxyAddress) {
+            requestConfig.httpsAgent = new HttpsProxyAgent(proxyAddress);
+        }
 
-  const { data } = await axios(requestConfig);
-  return data;
+        const { data } = await axios(requestConfig);
+        spinner.succeed('Authentication successful');
+        return data;
+    } catch (error) {
+        spinner.fail('Authentication failed');
+        throw error;
+    }
 }
 
 async function initiateCheckIn(proxyEnabled) {
-  for (let i = 0; i < configuration.length; i++) {
-    try {
-      console.log(`========================== Account ${i + 1} ==========================`.bold.cyan);
+    for (let i = 0; i < configuration.length; i++) {
+        console.log(`\n${gradient.rainbow(`≡≡≡≡≡≡≡≡≡≡≡≡≡ Account ${i + 1} ≡≡≡≡≡≡≡≡≡≡≡≡≡`)}\n`);
 
-      const token = configuration[i].token;
-      const proxyAddress = proxyEnabled ? configuration[i].proxy : null;
-      const response = await authenticateUser(token, proxyAddress);
-
-      await showUserData(token, proxyAddress);
-
-      if (response.msg.includes('already checked in')) {
-        logCheckInStatus('Check-in failed: Already checked in.', 'red');
-      } else {
-        logCheckInStatus('Check-in completed successfully.', 'green');
-      }
-
-      console.log();
-    } catch (error) {
-      logError(error);
-      continue;
+        try {
+            const token = configuration[i].token;
+            const proxyAddress = proxyEnabled ? configuration[i].proxy : null;
+            
+            const userData = await retrieveUserInfo(token);
+            displayUserStats(userData, proxyAddress);
+            
+            const response = await authenticateUser(token, proxyAddress);
+            
+            if (response.msg.includes('already checked in')) {
+                logCheckInStatus('Already checked in for today', 'red');
+            } else {
+                logCheckInStatus('Check-in completed successfully!', 'green');
+            }
+        } catch (error) {
+            logError(error);
+            continue;
+        }
     }
-  }
 }
 
 function logCheckInStatus(message, color) {
-  console.log(`[${moment().format('HH:mm:ss')}] ${message}`[color]);
+    const timestamp = moment().format('HH:mm:ss');
+    const statusIcon = color === 'green' ? '✓'.green : '✗'.red;
+    console.log(`\n[${timestamp}] ${statusIcon} ${message[color]}`);
 }
 
 function logError(error) {
-  console.log(`[${moment().format('HH:mm:ss')}] Error: ${error.message}`.red);
+    const timestamp = moment().format('HH:mm:ss');
+    console.log(`\n[${timestamp}] ⚠️  Error: ${error.message}`.red);
 }
 
-(async () => {
-  await displayHeader();
+async function startBot() {
+    await displayHeader();
 
-  const proxyChoice = readlineSync.question('Do you want to use proxies? (y/n): '.bold.cyan);
-  const proxyEnabled = proxyChoice.toLowerCase() === 'y';
-
-  const proxyStatus = proxyEnabled ? 'with a proxy'.yellow : 'without a proxy'.bold.yellow;
-  console.log(`Starting initial check-in ${proxyStatus}...`.bold.yellow);
-  await initiateCheckIn(proxyEnabled);
-
-  const checkInInterval = 12 * 60 * 60 * 1000;
-  const hoursInterval = checkInInterval / (60 * 60 * 1000);
-
-  setInterval(() => {
-    console.log(
-      `\nProcessing check-in at ${new Date().toLocaleString()}\n`.green
+    const proxyChoice = readlineSync.keyInYNStrict(
+        gradient.cristal('Do you want to use proxies?')
     );
-    initiateCheckIn(proxyEnabled);
-  }, checkInInterval);
 
-  console.log(`Reinitiating the process in ${hoursInterval} hours...`.green);
-})();
+    const proxyStatus = proxyChoice ? 'with proxy'.yellow : 'without proxy'.yellow;
+    console.log(`\n${gradient.pastel('Starting check-in process')} ${proxyStatus}...\n`);
+    
+    await initiateCheckIn(proxyChoice);
+
+    const hoursInterval = CHECK_IN_INTERVAL / (60 * 60 * 1000);
+    console.log(`\n${gradient.cristal('Bot will check in again after')} ${hoursInterval} ${gradient.cristal('hours')}`);
+    
+    setInterval(async () => {
+        console.log(gradient.rainbow('\n=== New Check-in Cycle Started ===\n'));
+        console.log(`Time: ${moment().format('YYYY-MM-DD HH:mm:ss')}\n`);
+        await initiateCheckIn(proxyChoice);
+    }, CHECK_IN_INTERVAL);
+}
+
+startBot().catch(console.error);
