@@ -4,6 +4,9 @@
     "colors": "^1.4.0",
     "https-proxy-agent": "^7.0.5",
     "moment": "^2.30.1",
-    "readline-sync": "^1.4.10"
+    "readline-sync": "^1.4.10",
+    "gradient-string": "^2.0.2",
+    "figlet": "^1.7.0",
+    "ora": "^5.4.1"
   }
 }
